@@ -1,1 +1,4 @@
 #This file lists file patterns to ignore from version control
+*.html
+*.txt
+.Rproj.user
