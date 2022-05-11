@@ -128,13 +128,29 @@ sum(pirates$age<32 & pirates$sex == "female") #2 pirates are both <32 and female
 sum(pirates$age<32 & pirates$sex == "female") / sum(pirates$age < 32) *100 #28.6%
 
 #What percent of female pirates are under the age of 32?
+sum(pirates$age<32 & pirates$sex == "female") / sum(pirates$sex == "female") *100 #40
 
 
+#Add a new column to the dataframe called tattoos.per.year which shows how many tattoos each pirate has for each year in their life.
+pirates$tattoos.per.year <- pirates$tattoos/pirates$age
+pirates
 
-#Add a new column to the dataframe called tattoos.per.year which shows how many tattooseach pirate has for each year in their life.
 #Which pirate had the most number of tattoos per year?
+max.tattoos <- pirates[pirates$tattoos.per.year == max(pirates$tattoos.per.year),]
+max.tattoos$name
+class(max.tattoos)
+max.tattoos$name
+pirates
+pirates[pirates$name == max.tattoos$name,]
+pirates[, pirates$name == max.tattoos]
+
 #What are the names of the female pirates whose favorite superhero is Superman?
+pirates[pirates$superhero == "Superman",]
+pirates$name[pirates[pirates$superhero == "Superman",]]
+
 #What was the median number of tattoos of pirates over the age of 20 whose favorite superhero is Spiderman?
+pirates.20.spider <- pirates[pirates$age >20 & pirates$superhero == "Spiderman",]
+median(pirates.20.spider$tattoos)
 
 ##Exercise 3 - Sorting##
 ########################
