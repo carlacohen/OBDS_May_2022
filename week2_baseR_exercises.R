@@ -168,3 +168,57 @@ data_sub <- data[data$int_length >= 100001 & data$int_length <= 200000,] #the co
 # Write your subsetdata frame to a tab separated file ie (include column names but not rownames)
 write.table(data_sub, "coding_gene_region_subset.bed", row.names = FALSE, col.names = TRUE, sep = "\t", quote = FALSE)
 
+
+##Extra Activity - Scalar and Vectors##
+
+#Create the vector 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 in three ways: once using c(), once using a:b, and once using seq()
+vector_1a <- c(1:10)
+vector_1b <- 1:10
+vector_1c <- seq(from = 1, to = 10, by = 1)
+
+#Create the vector 2.1, 4.1, 6.1, 8.1 in two ways, once using c() and once using seq()
+vector_2a <- c(2.1, 4.1, 6.1, 8.1)
+vector_2b <- seq(2.1, 8.1, 2)
+
+#Create the vector 0, 5, 10, 15 in 3 ways: using c(), seq() with a by argument, and seq() with a length.out argument
+vector_3a <- c(0, 5, 10, 15)
+vector_3b <- seq(0, 15, 5)
+vector_3c <- seq(from = 0, by = 5, length.out = 4)
+
+#Create the vector 101, 102, 103, 200, 205, 210, 1000, 1100, 1200 using a combination of the c() and seq() functions
+vector_4 <- c(seq(101, 103, 1), seq(200, 210, 5), seq(1000, 1200, 100))
+
+#Create a vector that repeats the integers from 1 to 5, 10 times. That is [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, …].
+#The length of the vector should be 50!
+vector_5 <- rep(1:5, 10)
+length(vector_5) 
+
+#Now, create the same vector as before, but this time repeat 1, 10 times, then 2, 10 times, etc., That is
+#[1, 1, 1, …, 2, 2, 2, …, … 5, 5, 5]. The length of the vector should also be 50
+
+vector_6 <- rep(1:5, times = 1, each = 10)
+length (vector_6)
+
+##Extra activity - working with dataframes##
+
+vector1 <- 1:10
+vector2 <- letters[1:10]
+vector3 <- rnorm(10, sd = 10)
+df <- data.frame(vector1, vector2, vector3, stringsAsFactors = FALSE)
+str(df)
+df
+
+#One can select columns from a data frame using either the name or the position. 
+#Use both methods to print the last two columns from the df data frame
+
+df[,2:3]
+df[, c("vector2", "vector3")]
+
+#Print all letters in the vector2 column of the data frame where the vector3 column has a positive value
+df[df$vector3 > 0, 2]
+df$vector2[df$vector3>0]
+
+#Look up the function paste(). Create a new vector combining the all columns of df separated by a underscore.
+
+new_vector <- paste(vector1, vector2, vector3, sep = "_")
+new_vector
