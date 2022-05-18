@@ -1,0 +1,982 @@
+---
+title: "Example code for introduction to Bioconductor"
+author: "Kevin Rue-Albrecht/updated by Carla Cohen"
+date: "23/03/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(Biostrings)
+library(BSgenome)
+library(BSgenome.Hsapiens.UCSC.hg38.masked)
+library(rtracklayer)
+library(org.Hs.eg.db)
+library(biomaRt)
+library(SummarizedExperiment)
+library(tximeta)
+library(tximportData)
+library(DESeq2)
+library(SingleCellExperiment)
+library(ExperimentHub)
+library(iSEE)
+library(scuttle)
+library(scater)
+```
+
+# Exercise
+
+## Exploring software packages
+
+- Visit the listing of packages on the Bioconductor [biocViews](https://bioconductor.org/packages/release/BiocViews.html) web page.
+
+- Use the `Autocomplete biocViews search` box in the upper left to identify packages that have been tagged for RNA sequencing analysis.
+
+- Explore other analysis like ChIP-seq, epigenetics, variant annotation, proteomics, single-cell genomics, etc.
+
+- Explore the graph of software packages by expanding and contracting individual terms.
+
+- In the RNA-seq category, find out which of `DESeq2` and `edgeR` is more popular, and go to their landing page.
+
+- Briefly explore the vignette and reference manual links.
+
+When would you consult the vignette? When would the reference manual be helpful?
+
+> Answer:
+> 
+
+# Demo
+
+## Bioconductor uses the S4 class system
+
+Define the class.
+
+```{r}
+setClass("Person",
+  representation(
+    name = "character",
+    age = "numeric")
+  )
+```
+
+Define the constructor function.
+
+```{r}
+Person <- function(name, age) {
+  new("Person", name = name, age = age)
+}
+```
+
+Use the constructor function to make an object.
+
+```{r}
+kevin <- Person(name = "Kevin", age = 21)
+kevin
+```
+
+Don't access internal slots directly.
+
+```{r}
+kevin@age # don't do that
+```
+
+The package developers should provide you with accessor functions.
+
+```{r}
+get_age <- function(object) {
+  object@age
+}
+```
+
+In which case, you should use them.
+
+```{r}
+get_age(kevin) # do that (if possible)
+```
+
+# Exercise
+
+## Install Bioconductor
+
+On the teaching cluster, all the packages required for the course are already installed.
+As a result, you do not need (and should not) install any package yourself.
+
+> Instead, you should ask the system administrators to install or update packages for you.
+
+To give you an idea, what the system administrators did essentially comes down to:
+
+```{r, include=TRUE, echo=TRUE, eval=FALSE}
+!!! DO NOT RUN!!
+#install.packages("BiocManager")
+#BiocManager::install(c("Biostrings", "S4Vectors"))
+```
+
+The package `r BiocStyle::CRANpkg("BiocManager")` is the only official Bioconductor package on CRAN.
+It provides functions to install, update, and more generally manage your library of Bioconductor (and CRAN) packages.
+
+The function `BiocManager::install()` can install packages from Bioconductor, CRAN, and even GitHub.
+Here, we demonstrate it with a vector of two package names.
+However, it can be used to install a single package name as a character value.
+
+- Run the function `BiocManager::valid()`.
+  What does it do?
+
+```{r}
+BiocManager::valid()
+```
+
+> Answer:
+> 
+
+# Exercise
+
+## Use Bioconductor packages and help pages
+
+- Load the `Biostrings` package.
+
+```{r}
+library(Biostrings)
+```
+
+- The package provides the object `DNA_ALPHABET`.
+  Print the object in the console and use the help page to explain the contents of the object.
+
+```{r}
+DNA_ALPHABET
+```
+It gives us codes for DNA nucleotides as per: https://www.bioinformatics.org/sms/iupac.html
+e.g. S=G or C
+
+
+```{r, eval=FALSE}
+help(DNA_ALPHABET)
+```
+
+- The package provides the function `IlluminaQuality()`.
+  Run some code from the "Examples" section of the help page, and describe what the function does.
+  
+```{r, eval=FALSE}
+help(IlluminaQuality)
+```
+  
+```{r}
+PhredQuality(0:40) #the PhredQuality object is a string of 41 symbols that represent quality scores
+
+```
+
+- Access the package vignette(s).
+  How many vignette does the package include?
+  
+  https://bioconductor.org/packages/release/bioc/html/Biostrings.html
+
+```{r, eval=FALSE}
+browseVignettes(package = "Biostrings") #doesn't actually work on the teaching cluster!
+#type in R search page instead
+```
+
+- Import sequences in the file `TruSeq3-PE-2.fa`.
+  What is the class of the object? "DNAStringSet"
+
+?Use the help page to find out how to read in a fasta file.
+
+Reminder: fasta format
+>name
+AATACAT
+>name2
+ATCGCGC
+
+
+```{r}
+truseq_adapters <- readDNAStringSet("/project/obds/shared/resources/3_r_stats_genomics/r_bioconductor/TruSeq3-PE-2.fa")
+truseq_adapters
+class(truseq_adapters)
+
+```
+It has created an object of class ""DNAStringSet" which contains the sequence names and sequences. 
+# Exercise
+
+## BSgenome packages
+
+- Load the package `BSgenome`.
+
+```{r}
+library(BSgenome)
+```
+
+- Use the function `BSgenome::available.genomes()`.
+  What does it do?
+
+Lists all the available genomes in their package name format.
+```{r}
+BSgenome::available.genomes()
+```
+
+- Load the package `BSgenome.Hsapiens.UCSC.hg38.masked`.
+This is the sub-package with the genome you want. 
+
+Masked means that repeats are masked
+```{r}
+library(BSgenome.Hsapiens.UCSC.hg38.masked)
+```
+
+- Assign the genome object provided in the package to a new object called `genome`.
+
+The ones that looks like chr4_GL£&adf_alt etc are partial contigs, we know which chromosome thye are but not exactly where.
+If we excluded it, then we would not get reads mapped there. 
+Also to do with hypervariable regions in immune genes (the onese that end _alt).There are many versions of HLA-A for example.
+
+
+
+```{r}
+genome <- BSgenome.Hsapiens.UCSC.hg38.masked
+genome
+seqnames(genome)
+
+```
+
+An E-box (enhancer box) is a DNA response element found in some eukaryotes that acts as a protein-binding site and has been found to regulate gene expression in neurons, muscles, and other tissues.
+
+The E-box motif is `"CANNTG"`.
+
+- Extract the sequence of chromosome Y from the `genome` object above.
+
+```{r}
+chrY <- genome$chrY
+```
+
+- Count the number of E-box motifs present on chromosome Y using the appropriate method available in the `Biostrings` package.
+
+```{r}
+Ebox <- "CANNTG"
+countPattern(Ebox, chrY, fixed = FALSE)
+```
+No patterns are found containing "N" because htere are not Ns in the genome. 
+So we need to include the argument "fixed = FALSE" which will allow it to match N to anything. 
+
+There are lots of other functions
+e.g. "translate" to convert DNA to protein sequence.
+
+
+# Demo
+
+## Creating genomic ranges
+
+```{r}
+demo_granges <- GRanges(
+  seqnames = c("chr1", "chr2"),
+  ranges = IRanges(
+    start = c(10, 20),
+    end = c(25, 35)),
+  metadata1 = c("control", "target"),
+  metadata2 = c(1, 2))
+demo_granges
+```
+
+**What genomics file format does this remind you of?**
+
+> Answer:
+> bed
+
+# Demo
+
+## Accessing the contents of GRanges objects
+
+```{r}
+seqnames(demo_granges)
+```
+
+```{r}
+start(demo_granges)
+```
+
+```{r}
+end(demo_granges)
+```
+
+```{r}
+seqlevels(demo_granges)
+```
+These are treated like a factor.
+
+# Demo
+
+## Metadata columns
+
+```{r}
+mcols(demo_granges)
+```
+Each range has some metadata.
+
+
+
+```{r}
+demo_granges$metadata1
+```
+Then you can also add metadata to the entire object. (Currently an empty list)
+
+```{r}
+metadata(demo_granges)
+```
+
+# Demo
+
+## DataFrame
+
+```{r}
+library(S4Vectors)
+demo_DataFrame <- DataFrame(
+    column1 = c("A", "B"),
+    column2 = c(1, 2)
+)
+demo_DataFrame
+```
+This is a different style of df where there is a data table with an associated metadata table.
+
+
+```{r}
+#add the metadata
+mcols(demo_DataFrame) <- DataFrame(
+  column_type = c("character", "numeric")
+)
+mcols(demo_DataFrame)
+```
+
+# Exercise
+
+## rtracklayer
+This package is used to import files such as gtf and bed that can be used by GenomicRanges.
+
+- Load the `rtracklayer` package.
+
+```{r}
+library(rtracklayer)
+```
+
+- Import the file `Homo_sapiens.GRCh38.104.gtf.gz` using the function `rtracklayer::import()`.
+  Assign value to an object called `gtf_data`.
+
+```{r}
+gtf_data <- rtracklayer::import("/project/obds/shared/resources/3_r_stats_genomics/r_bioconductor/Homo_sapiens.GRCh38.104.gtf.gz")
+gtf_data
+
+```
+
+- What are the metadata columns available in the object?
+
+```{r}
+mcols(gtf_data) #gives you the whole DataFrame
+colnames(mcols(gtf_data)) #shows just the column names
+```
+
+- Use the function `subset()` to filter the annotations for the gene `ACTB`.
+
+```{r}
+head(gtf_ACTB$gene_id)
+
+gtf_ACTB <- subset(gtf_data, gene_name == "ACTB")
+gtf_ACTB
+```
+
+- How many transcripts do the annotations describe for that gene?
+
+```{r}
+#how many transcript identifiers are there?
+gtf_ACTB$transcript_id %>%  #extract the transcript IDs
+  unique() %>% #select the unique values
+  setdiff(NA) %>% #remove the NAs, can also use na.omit
+  length() #count them
+
+#in the gtf file each transcript has multiple entries for gene, each exon, coding sequences etc.
+
+
+
+```
+
+- Subset the annotations to exons, and use the `split()` function to separate exons from different transcripts.
+  What is the class of the object that is returned?
+  GRangesList object.
+
+```{r}
+gtf_ACTB$type
+gtf_ACTB_exons <- subset(gtf_ACTB, type == "exon")  #select the exons of ACTB
+gtf_ACTB_exons$transcript_id #look for the transcript_ids
+gtf_ACTB_transcripts <- split(gtf_ACTB_exons, gtf_ACTB_exons$transcript_id) #split the exons by transcript id
+gtf_ACTB_transcripts #have a look at the output
+str(gtf_ACTB_transcripts) #view the structure
+gtf_ACTB_transcripts$ENST00000414620 #view the ranges for one transcript_id
+```
+
+# Exercise
+
+## Annotation packages
+
+Each annotation packages contains a database of information.
+
+The `org.db` family of packages provide annotations that link  several types of identifiers for genes, proteins, and pathways (e.g. KEGG, Gene Ontology).
+
+- Load the package `org.Hs.eg.db`.
+
+```{r}
+library(org.Hs.eg.db)
+```
+
+Each `OrgDb` package contains an object of the same name as the package.
+
+- What is the class of the object?
+OrgDb object
+
+```{r}
+org.Hs.eg.db
+```
+
+- Use the `columns()` method to discover which sorts of annotations can be extracted
+from the object.
+
+```{r, include=TRUE}
+columns(org.Hs.eg.db)
+```
+
+- Use the `keytypes()` method to discover which columns can be used to query information.
+
+```{r}
+keytypes(org.Hs.eg.db)
+```
+eg ENSEMBL contains EnsemblID
+GO gene ontoloty
+Symbol - gene symbol 
+PMID pub med identifier of papers mentioning this gene
+
+In this case columns and keytypes are the same list (but not always).
+
+- Use the `keys()` method to get the first six gene symbols in the database.
+  Store as `human_symbols`.
+
+```{r}
+human_symbols <- head(keys(org.Hs.eg.db, keytype = "SYMBOL"), n=6)
+human_symbols
+```
+
+- Use the `AnnotationDbi::select()` method to fetch the Entrez and Ensembl identifiers for those gene symbols.
+
+```{r}
+AnnotationDbi::select(org.Hs.eg.db, #search this db
+                      keys =human_symbols, #this is what we are looking for
+                      columns = c("ENTREZID", "ENSEMBL"), #this is what we want out
+                      keytype = "SYMBOL") #this is the type of query we are giving
+
+```
+
+  + What happens if you do not specify `AnnotationDbi`?
+
+> Answer:
+> It might use select from another package
+
+- Use the `mapIds()` method to get the Ensembl identifier for those gene symbols.
+
+This is similar to above but the output is a named vector rather than a table.
+So useful if you want to replace ensemble ID with symbol.
+
+
+```{r}
+mapIds(org.Hs.eg.db, keys = human_symbols, column = "ENSEMBL", keytype = "SYMBOL")
+```
+
+# Exercise
+
+## biomaRt
+
+- Load the package `biomaRt`.
+
+```{r}
+library(biomaRt)
+```
+
+- Use the `listMarts()` function to list the BioMart databases to which the `biomaRt` package can connect.
+This contacts the online db and prints the answer here.
+We will use Ensemble Genes today. ENSEMBL_MART_ENSEMBL
+
+```{r}
+listMarts()
+```
+
+- Use the `listEnsemblArchives()` function to lists the available archived versions of Ensembl.
+The Ensembl website also has versions that are released periodically.
+
+```{r}
+listEnsemblArchives()
+```
+
+- Use the `useMart()` function to create an object named `mart` using the `"ENSEMBL_MART_ENSEMBL"` BioMart database and set the host option to `"https://may2021.archive.ensembl.org"`.
+  Why would one do that in practice?
+
+```{r}
+mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", host = "https://may2021.archive.ensembl.org") 
+#leave out dataset for now as we don't know which one we want
+
+mart
+```
+
+> Answer:
+> 
+
+- Use the `listDatasets()` function to list the datasets available in the selected BioMart database.
+  What is the identifier of the database that contains information for _Homo sapiens_?
+
+```{r}
+listDatasets(mart)
+View(listDatasets(mart)) #view the table and easily search for human
+#hsapiens_gene_ensembl
+
+```
+
+- Use again the `useMart()` function, and replace the `mart` object by a new one that points to information for _Homo sapiens_.
+
+```{r}
+mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
+                dataset = "hsapiens_gene_ensembl",
+                host = "https://may2021.archive.ensembl.org")
+mart
+```
+
+- Use the `listAttributes()` function to list the fields of information available in the dataset.
+Attributes are the equivalent to "columns" in the example above.
+
+```{r}
+listAttributes(mart)
+View(listAttributes(mart))
+```
+
+- Use the `getBM()` function to fetch the chromosome, start and end positions, and strand information for the gene symbols that you stored earlier as `human_symbols`.
+
+```{r}
+getBM(attributes = c("hgnc_symbol", "chromosome_name", "start_position", "end_position", "strand"), #what output do you want?
+      filters = "hgnc_symbol", #where are your search terms coming from
+      values = human_symbols, #what are your search terms?
+      mart = mart) #what is the database you are searching?
+```
+
+# Demo
+
+## EnsDb packages
+
+```{r}
+library(EnsDb.Hsapiens.v86)
+```
+
+```{r}
+class(EnsDb.Hsapiens.v86)
+```
+
+```{r}
+columns(EnsDb.Hsapiens.v86)
+```
+
+# Demo
+
+## TxDb packages
+
+```{r}
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+```
+
+```{r}
+class(TxDb.Hsapiens.UCSC.hg38.knownGene)
+```
+
+```{r}
+columns(TxDb.Hsapiens.UCSC.hg38.knownGene)
+```
+
+```{r}
+keytypes(TxDb.Hsapiens.UCSC.hg38.knownGene)
+```
+
+```{r}
+keys(TxDb.Hsapiens.UCSC.hg38.knownGene, "GENEID") %>% head()
+```
+
+# Exercise
+
+## Creating a SummarizedExperiment object
+demo_count_matrix = Making up some data to represent the experiment
+demo_rowdata is the gene metadata
+coldata is the sample metadata eg control, treated
+
+demo_se is created from these three matrices using the command SummarizedExperiment. 
+
+Usually you would read these files into R from your our experimental output/spreadsheets etc. 
+
+```{r, include=TRUE, results='hide'}
+library(SummarizedExperiment)
+demo_count_matrix <- matrix(
+  data = c(1, 2, 3, 4, 5, 6, 7, 8), nrow = 4, ncol = 2,
+  dimnames = list(
+    paste0("gene", 1:4),
+    paste0("sample", 1:2)
+  ))
+demo_rowdata <- DataFrame(
+  symbol = head(letters, 4),
+  length = c(1234, 5678)
+  )
+demo_coldata <- DataFrame(
+  condition = c("control", "treated"),
+  age = c(18, 20)
+  )
+demo_se <- SummarizedExperiment(
+  assays = list(
+    counts = demo_count_matrix),
+  rowData = demo_rowdata,
+  colData = demo_coldata)
+```
+
+```{r, include=TRUE}
+demo_se #summary view of object
+str(demo_se) #more verbose output
+```
+
+Use the methods `assays()`, `assayNames()` `assay()`, `colData()`, `rowData()`, `mcols()` and `metadata()` on the object `demo_se`.
+
+```{r}
+assays(demo_se) #extracts all the assays as a list
+assayNames(demo_se) #what are the names of the assays in the object (here there is just one called counts)
+assay(demo_se, "counts") #view the assay data for one assay
+#there will only ever be one colData and rowData as this doeos not change as the data is analysed (e.g. age of patient)
+colData(demo_se)
+rowData(demo_se)
+#can also add additional information to this metadata
+colData(demo_se)$score <- c(100, 200)
+mcols(demo_se)
+#you can also add metadata for the whole experiment (e.g. the name of the experiment) rather than the samples therein. 
+metadata(demo_se) <- list(experiment_name = "Demonstration")
+demo_se
+
+```
+
+What do those functions do?
+
+> Answer:
+> 
+
+# Exercise
+
+## Assembling a SummarizedExperiment object
+
+- Import the matrix in the file `counts.csv`.
+  Call it `assay_counts`.
+
+```{r}
+assay_counts <- read.table("/project/obds/shared/resources/3_r_stats_genomics/r_bioconductor/summarized_experiment/counts.csv",
+                           row.names = 1, sep = ",", header = TRUE)
+head(assay_counts)
+#colnames(assay_counts) <- assay_counts[1,]
+
+#this is a df, convert to matrix
+assay_counts <- as.matrix(assay_counts)
+
+class(assay_counts)
+head(assay_counts)
+```
+
+- Import the data frames in the files `sample_metadata.csv` and `gene_metadata.csv`.
+  Call them `sample_metadata` and `gene_metadata`.
+
+```{r}
+sample_metadata <- read.csv("/project/obds/shared/resources/3_r_stats_genomics/r_bioconductor/summarized_experiment/sample_metadata.csv")
+head(sample_metadata)
+```
+
+```{r}
+gene_metadata <- read.csv("/project/obds/shared/resources/3_r_stats_genomics/r_bioconductor/summarized_experiment/gene_metadata.csv")
+head(gene_metadata)
+```
+
+- Use the function `SummarizedExperiment()` to combine those three objects into a single `SummarizedExperiment` object.
+  Call it `demo_se`.
+  
+  + Assign the matrix to an assay named `counts`.
+
+This is a really important step because if you set up your experiment wrong then you might compare the wrong things in the analysis!
+
+```{r}
+demo_se <- SummarizedExperiment(assays = list(counts = assay_counts),
+  rowData = gene_metadata,
+  colData = sample_metadata)
+  
+demo_se
+
+assays(demo_se)
+```
+
+# Demo
+
+## Inheritance and coercion
+
+```{r}
+demo_dataframe <- data.frame(A = c(1, 2), B = c(3, 4))
+demo_dataframe
+```
+
+```{r}
+demo_DataFrame <- as(demo_dataframe, "DataFrame")
+demo_DataFrame
+```
+
+# Exercise
+
+## SummarizedExperiment extensions
+
+- Load the package `DESeq2`.
+
+```{r}
+library(DESeq2)
+```
+
+- Convert your earlier `demo_se` to a `DESeqDataSet` object, using the `as()` function.
+  Call the object `demo_deseq`.
+
+```{r}
+demo_deseq <- as(demo_se, "DESeqDataSet")
+demo_deseq
+```
+
+- What are the slots of information present in the `DESeqDataSet` object?
+  Use the function `slotNames()`.
+
+```{r}
+slotNames(demo_deseq)
+```
+
+
+- Which slots are new compared to the `SummarizedExperiment` object?
+
+```{r}
+slotNames(demo_se)
+```
+We now have the options design, dispersionFunction, rowRanges.
+
+
+- Which components of the `DESeqDataSet` object can you access using accessor functions (e.g., `assays()`) ?
+  Do all of those accessors work on the original `demo_se` object?
+
+```{r}
+
+design(demo_deseq) #currently null as not yet defined
+assays(demo_deseq) #same as for the se object
+
+```
+
+> Answer:
+> 
+
+# Exercise
+
+## SingleCellExperiment
+
+The class name `SingleCellExperiment` is only a name.
+While developed with single-cell genomics in mind, it is not limited to that use.
+Remember that classes are simply defined by their slots and methods.
+If the slots and methods are suitable to store and process another type of data, then go for it!
+
+- Install and load the package `SingleCellExperiment`.
+
+```{r}
+library(SingleCellExperiment)
+```
+
+- Convert your earlier `demo_se` to a `SingleCellExperiment` object, using the `as()` function.
+  Call the object `demo_sce`.
+
+```{r}
+demo_sce <- as(demo_se, "SingleCellExperiment")
+```
+
+- Display the object.
+  What additional information can the `SingleCellExperiment` class store, relative to the `SummarizedExperiment` class?
+
+```{r}
+demo_sce
+```
+
+> Answer:
+> 
+
+- Use the methods `reducedDimNames()`, `reducedDims()`, and `reducedDim()` on the object `demo_sce`.
+  What do they do?
+
+```{r}
+reducedDimNames(demo_sce)
+reducedDims(demo_sce)
+reducedDim(demo_sce)
+```
+
+> Answer:
+> 
+
+- **Bonus point:** Use the method `reducedDim()` to store a new dimensionality reduction matrix called `"PCA"` in the object.
+  Display and inspect the updated object.
+
+```{r}
+pca_object <- prcomp(t(assay(demo_sce)))
+reducedDim(demo_sce, "PCA") <- pca_object$x
+demo_sce
+```
+
+# Demo
+
+## The ExperimentHub package and resources
+
+```{r, include=TRUE}
+library(ExperimentHub)
+ehub <- ExperimentHub()
+ehub
+```
+
+```{r}
+query(ehub, c("SingleCellExperiment"))
+```
+
+```{r, include=TRUE}
+eh1433 <- ehub[["EH1433"]]
+eh1433
+```
+
+# Demo
+
+## Description of a dataset in the ExperimentHub
+
+```{r}
+ehub["EH1433"]
+```
+
+# Exercise
+
+## Interactive visualisation using iSEE
+
+- Load the package `iSEE`.
+
+```{r}
+library(iSEE)
+```
+
+- Use the `iSEE()` function on the `SingleCellExperiment` object `eh1433`.
+
+```{r, include=TRUE, eval=FALSE}
+iSEE(eh1433)
+```
+
+- Subset the object `eh1433` to remove cells where the sum of counts is `NA`.
+
+```{r}
+eh1433 <- eh1433[, !is.na(colSums(assay(eh1433)))]
+eh1433
+```
+
+- Use the packages `scuttle` and `scater` to compute and add a PCA result to the object `eh1433`
+
+```{r}
+library(scuttle)
+library(scater)
+eh1433 <- logNormCounts(eh1433)
+eh1433 <- runPCA(eh1433)
+```
+
+- Launch the `iSEE` GUI again.
+  What changed?
+
+```{r, eval=FALSE}
+iSEE(eh1433)
+```
+
+# Advanced
+
+## BiocManager repositories
+
+- Run `options("repos")`.
+  What do you see?
+
+```{r}
+options("repos")
+```
+
+The function `options()` can be used to get or set global options of the current <i class="fab fa-r-project"></i> session.
+
+- Run `BiocManager::repositories()`.
+
+```{r}
+BiocManager::repositories()
+```
+
+The function reports the URLs from which to install Bioconductor and CRAN packages.
+
+- Set the `repos` option to the value of `BiocManager::repositories()`.
+
+```{r}
+options(repos = BiocManager::repositories())
+```
+
+- Run `options("repos")` again.
+  What do you see now?
+  What does it mean?
+
+```{r}
+options("repos")
+```
+
+> Answer:
+> 
+
+# Advanced
+
+## Import SummarizedExperiment objects using tximeta
+
+- Load the packages `tximeta` and `tximportData`.
+
+```{r}
+library(tximeta)
+```
+
+The help page of the `tximeta()` function refers to an example output of the Salmon program that is installed on your computer at `system.file("extdata/salmon_dm/SRR1197474/quant.sf", package="tximportData")`.
+
+```{r, eval=FALSE}
+help(tximeta)
+```
+
+- Navigate to that location in the file explorer of your respective operating system, and examine its contents, in a text editor or your terminal application.
+
+```{r, eval=FALSE}
+file.edit(system.file("extdata/salmon_dm/SRR1197474/quant.sf", package="tximportData"))
+```
+
+- Run the rest of the example code, and discuss the use of a linked transcriptome with `tximeta` (read the help page of `makeLinkedTxome()` and set `write=TRUE` instead of using the example code as-is).
+
+```{r}
+dir <- system.file("extdata/salmon_dm", package="tximportData")
+files <- file.path(dir, "SRR1197474", "quant.sf") 
+coldata <- data.frame(files, names="SRR1197474", condition="A", stringsAsFactors=FALSE)
+```
+
+```{r}
+se <- tximeta(coldata)
+se
+```
+
+```{r}
+indexDir <- file.path(dir, "Dm.BDGP6.22.98_salmon-0.14.1")
+fastaFTP <- c("ftp://ftp.ensembl.org/pub/release-98/fasta/drosophila_melanogaster/cdna/Drosophila_melanogaster.BDGP6.22.cdna.all.fa.gz",
+              "ftp://ftp.ensembl.org/pub/release-98/fasta/drosophila_melanogaster/ncrna/Drosophila_melanogaster.BDGP6.22.ncrna.fa.gz")
+gtfPath <- file.path(dir, "Drosophila_melanogaster.BDGP6.22.98.gtf.gz")
+makeLinkedTxome(indexDir=indexDir, source="Ensembl", organism="Drosophila melanogaster",
+                release="98", genome="BDGP6.22", fasta=fastaFTP, gtf=gtfPath, write=TRUE, jsonFile = "tximeta.json")
+se <- tximeta(coldata)
+se
+```
+
+- What other types of quantification programs does `tximeta` support?
+  Where do you find that information?
+
+```{r, eval=FALSE}
+help(tximport)
+```
+
+> Answer:
