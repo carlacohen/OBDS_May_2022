@@ -1,0 +1,251 @@
+---
+title: "OBDS Gene Set Enrichment and Pathway Analysis Practical"
+author: "Charlie George/updated by Carla Cohen"
+date: "15/10/2021"
+output: html_document
+---
+
+This is the pathway analysis practical of the OBDS course 
+- The first part of this pracical is using gprofiler to perform ORA on output dataset of differentially expressed genes from DESeq2
+
+# load packages 
+```{r}
+# load librarys
+
+library(tidyverse)
+library(gprofiler2)
+
+```
+
+# Read in our tables from this morning in a new Rmd file
+```{r}
+# read in files from this morning 
+
+# 1. all results (this was filtered to remove non DE genes in our DESeq2 list so only contains genes expressed in our samples) -> call this table 'all_genes_df'  - this will be our background
+all_genes_df <- read.csv("CD8_vs_CD4_DE_results_lfcshrinkage_allgenes.csv")
+all_genes_df <- all_genes_df %>% dplyr::rename(ensemblID = X)
+
+#filter out the genes which padj is NA 
+all_genes_df_filtered <- all_genes_df %>% filter(padj != "NA")
+
+# 2. all significant upregulated genes -> call this upreg_genes_df
+upreg_genes_df <- read.csv("CD8_vs_CD4_DKO_DE_results_lfcshrinkage_0.05_log2FC1_up.csv")
+upreg_genes_df <- upreg_genes_df %>% dplyr::rename(ensemblID = X)
+
+# 3. all significant down regulated genes -> call this downreg_genes_df 
+downreg_genes_df <- read.csv("CD8_vs_CD4_DKO_DE_results_lfcshrinkage_0.05_log2FC1_down.csv")
+downreg_genes_df <- downreg_genes_df %>% dplyr::rename(ensemblID = X)
+
+
+# Check the dimensions of each of your dataframes using dim()
+# upreg_genes_df should be 915
+# downreg_genes_df should be 1204
+# all_genes_df_filtered should be 17729
+
+dim(upreg_genes_df)
+dim(downreg_genes_df)
+dim(all_genes_df_filtered)
+
+```
+Now we want a vector of gene ids to use for analysis 
+
+```{r}
+# from each of these dataframes get a vector of the ensembl ids 
+all_gene_ids <- all_genes_df_filtered$ensembleID
+    
+upreg_gene_ids <- upreg_genes_df$ensemblID
+    
+downreg_gene_ids <- downreg_genes_df$ensemblID
+```
+
+#Perform ORA using g:profiler 
+
+1. Look at documentation - https://cran.r-project.org/web/packages/gprofiler2/vignettes/gprofiler2.html
+```{r}
+# use the gost() function - what paramters should we include/change 
+# we want to test the ORA of upreg_gene_ids vs our all_gene_ids
+
+# get help for function
+?gost() 
+
+# write query and assign to output variable named `gost_results_obj`
+gost_results_obj <- gost(upreg_gene_ids, 
+                         organism = "mmusculus",  
+                         custom_bg = all_gene_ids)
+
+# what are our outputs  
+str(gost_results_obj)
+
+```
+
+```{r}
+# plot our results using in built function in gprofiler -> which one is it? 
+gostplot(gost_results_obj, capped = TRUE, interactive = TRUE)
+
+```
+
+```{r}
+# what does as_short_link = FALSE do in gost() function? 
+
+
+gost_results_obj_link <- gost(query = upreg_gene_ids, 
+                organism = "mmusculus", 
+                exclude_iea = TRUE, # change to True as have alot of results otherwise
+                correction_method = "g_SCS",  # this is thier own multiple testing coorrection - actually more strignent then bonferroni or BH 
+                custom_bg = all_gene_ids, # make sure this is all gene ids 
+                as_short_link = TRUE)
+
+gost_results_obj_link
+```
+
+Answer -> returns URL instead of df
+
+```{r}
+# Filter results table for genesets with between 5-300 genes 
+
+head(gost_results_obj$result)
+gost_results_df <- gost_results_obj$result
+gost_results_df_5to300_genes <- gost_results_df %>% 
+  filter (term_size >5) %>%
+  filter (intersection_size <300)
+
+```
+
+
+2. Try querying multiple gene lists at the same time (up and down regulated genes) using Multiple queries - see the documentation 
+
+```{r}
+
+multi_gostquery_results_obj <- gost(query = list("upreg_genes" = upreg_gene_ids,
+                                                  "downreg_genes"= downreg_gene_ids),
+                         organism = "mmusculus",  
+                         custom_bg = all_gene_ids, 
+                         multi_query = TRUE)
+
+
+```
+
+Can you plot these querys together?
+
+```{r}
+gostplot(multi_gostquery_results_obj, capped = TRUE, interactive = TRUE)
+
+```
+
+Output the get_version_info() to save the versions of the databases that were used for the analysis!! 
+```{r}
+get_version_info(organism = "mmusculus")
+
+```
+
+Bonus Exercise!
+
+DESeq2 to FGSEA
+
+we will use the `all_genes_df_filtered` object we already created
+
+For moree details look at this vignette : https://stephenturner.github.io/deseq-to-fgsea/
+or the FGSEA official vignette: https://bioconductor.org/packages/release/bioc/vignettes/fgsea/inst/doc/fgsea-tutorial.html  
+to get other genesets like GO/MSigDB genesets in R and for different species use msigdbr : https://cran.r-project.org/web/packages/msigdbr/vignettes/msigdbr-intro.html 
+```{r}
+library(fgsea)
+library(msigdbr)
+```
+
+ All you’ll care about later on is the gene symbol and the Log2FoldChange. Get just those, and remove the NAs. Finally, if you have multiple Log2FC values for the same symbol, you’ll want to deal with that in some way. Here I’m just averaging them.
+ 
+
+ 
+```{r}
+all_genes_df_filtered_avg <- all_genes_df_filtered %>% 
+  dplyr::select(gene_symbols,log2FoldChange) %>% 
+  na.omit() %>% 
+  distinct() %>% 
+  group_by(gene_symbols) %>% 
+  summarize(log2FoldChange=mean(log2FoldChange))
+all_genes_df_filtered_avg
+
+
+```
+
+
+We’re going to use the fgsea package for fast preranked gene set enrichment analysis (GSEA)
+
+The fgsea() function requires a list of gene sets to check, and a named vector of gene-level statistics (log2FC), where the names should be the same as the gene names in the pathways list. First, let’s create our named vector of test statistics
+
+See ?tibble::deframe for help here - 
+
+deframe() converts two-column data frames to a named vector or list, using the first column as name and the second column as value.
+```{r}
+ranks <- deframe()
+head(ranks, 20)
+```
+
+
+Let’s use the Hallmark gene set from MSigDB. Hallmark gene sets summarize and represent specific well-defined biological states or processes and display coherent expression. These gene sets were generated by a computational methodology based on identifying overlaps between gene sets in other MSigDB collections and retaining genes that display coordinate expression.
+
+you can either download a gmt symbols file directly from MSigDB or use misgidbr
+
+As we have mouse species we will use msigdbr
+
+```{r}
+all_gene_sets = msigdbr(species = "Mus musculus")
+head(all_gene_sets)
+
+#There is a helper function to show the available species. Either scientific or common names are acceptable.
+msigdbr_species()
+```
+
+You can retrieve data for a specific collection, such as the hallmark gene sets.
+
+The msigdbr() function output is a data frame and can be manipulated using more standard method
+
+```{r}
+h_gene_sets = msigdbr(species = "mouse", category = "H")
+```
+
+look at the fgseaSimple() function, how does it want the pathway gensets?
+
+how would you create a named list of genesets with symbols as genes
+
+```{r}
+hallmark_list = split()
+```
+
+Now we can run fgsea yay!
+```{r}
+fgseaRes <- fgsea()
+```
+
+tidy the result
+
+```{r}
+fgseaResTidy <- fgseaRes %>%
+  as_tibble() %>%
+  arrange(desc(NES))
+```
+
+
+show in a nice table
+```{r}
+fgseaResTidy %>% 
+  dplyr::select(-leadingEdge, -ES, -nMoreExtreme) %>% 
+  arrange(padj) %>% 
+  DT::datatable()
+```
+
+Plot the normalized enrichment scores. Color the bar indicating whether or not the pathway was significant:
+
+```{r}
+ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
+  geom_col(aes(fill=padj<0.05)) +
+  coord_flip() +
+  labs(x="Pathway", y="Normalized Enrichment Score",
+       title="Hallmark pathways NES from GSEA") + 
+  theme_minimal()
+```
+
+Now only plot the top 10 up and Down NES pathways based on padjusted values
+```{r}
+
+```
