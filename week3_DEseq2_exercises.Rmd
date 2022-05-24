@@ -724,7 +724,7 @@ dim(results_obj_shrunk_df) == dim(results_obj_shrunk) #we have kept all the gene
 # Export all the results to CSV
 
 ```{r}
-write_csv(results_obj_shrunk_df, "CD8_vs_CD4_DE_results_lfcshrinkage_allgenes.csv")
+write.csv(results_obj_shrunk_df, "CD8_vs_CD4_DE_results_lfcshrinkage_allgenes.csv")
 ```
 
 # Filter res_df and save as CSV
@@ -743,13 +743,13 @@ res_0.05_up <- results_obj_shrunk_df %>%
 res_0.05_down <- results_obj_shrunk_df %>% 
     dplyr::filter(padj < 0.05 & log2FoldChange < -1)
 
-write_csv(res_0.05, 
+write.csv(res_0.05, 
           "CD8_vs_CD4_DKO_DE_results_lfcshrinkage_0.05_log2FC1.csv")
 
-write_csv(res_0.05_up,
+write.csv(res_0.05_up,
           "CD8_vs_CD4_DKO_DE_results_lfcshrinkage_0.05_log2FC1_up.csv")
 
-write_csv(res_0.05_down,
+write.csv(res_0.05_down,
           "CD8_vs_CD4_DKO_DE_results_lfcshrinkage_0.05_log2FC1_down.csv")
 ```
 
