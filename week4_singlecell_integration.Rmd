@@ -1,0 +1,616 @@
+---
+title: Week4-day5 :integration template"
+author: "Devika Agarwal/updated by Carla Cohen"
+date: "21/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) #print code and results
+```
+
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(SeuratWrappers)
+library(patchwork)
+library(tidyverse)
+library(batchelor)
+library(harmony)
+library(lisi)
+library(MAST)
+options(future.globals.maxSize = 4000 * 1024^2)    # Maximum allowed total size (in bytes) of global variables identified
+#this will stop the integration running out of memory, see vignette for details
+#https://satijalab.org/seurat/articles/future_vignette.html
+
+```
+
+
+Read in already  QCed and filtered Rds objects
+
+
+```{r}
+pbmcv2 <- readRDS("/t1-data/project/obds/shared/resources/4_r_single_cell/integration/pbmcv2_filtered.rds")
+pbmcv3 <- readRDS("/t1-data/project/obds/shared/resources/4_r_single_cell/integration/pbmcv3_filtered.rds")
+```
+
+We have already done some basic QC and filtering for nCount_RNA/nFeature_RNA/percent.mt for today.
+
+Plot these metadata covariates to see how they range for both the datasets 
+
+use `VlnPlot()` from Seurat
+
+```{r}
+pbmcv2 #13070 features across 859 samples within 1 assay 
+pbmcv3  #15246 features across 778 samples within 1 assay 
+
+pbmcv2[[]]
+pbmcv3[[]]
+p1 <- VlnPlot(pbmcv2, 
+              features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+p2 <- VlnPlot(pbmcv3,
+              features = c("nCount_RNA", "nFeature_RNA", "percent.mt"))
+
+library(cowplot)
+plot_grid(p1, p2, ncol = 1)
+```
+
+All the parameters have higher values for v3.
+
+# Merge the two objects together (No Batch correction)
+Vigentte: https://satijalab.org/seurat/articles/merge_vignette.html
+
+```{r}
+
+seurat_merged <- merge(x = pbmcv2,y = pbmcv3,
+                       add.cell.ids = c("v2", "v3")
+)
+
+#include merge.data = TRUE only if you want to keep prior normalisations done on each object individually
+
+```
+
+
+
+Check the dims of the merged object in comparison to the separate objects
+
+what is the total gene number in the merged object compared to each single object?
+
+```{r}
+dim(pbmcv2) #13070   859
+dim(pbmcv3) #15246   778
+dim(seurat_merged) # 15413  1637
+
+#the total gene number has not increased by much since there are many genes in common
+#the cell number is the total of the cell number in the two groups
+
+seurat_merged[[]]
+#the cell IDs now have a prefix of "v2" or "v3" in front of the barcode
+
+
+```
+
+> SCTransform normalisation and clustering workflow
+
+ 
+ Do you want to regress any meta.data variables ?
+
+```{r, warning=FALSE}
+
+seurat_merged <- SCTransform(object = seurat_merged,
+                             vars.to.regress = "percent.mt"
+                             )
+
+```
+
+Plot to see how the nCount_RNA looks before and after SCT normalisation for the merged dataset?
+
+Did SCT do a good job in normalizing the sequencing depth across the two datasets?
+
+
+```{r}
+
+seurat_merged[[]] #we have new columns in the metadata
+VlnPlot(seurat_merged,
+        features = c("nCount_RNA", "nCount_SCT"),
+        same.y.lims = TRUE,
+        pt.size = 0)
+
+
+```
+The counts have been normalised fairly well between v2 and v3.
+
+What should the Default Assay be?
+
+```{r}
+DefaultAssay(seurat_merged)
+#SCT because now we want to work on the transformed data
+```
+
+
+
+Plot the Variable features plot for data with top 10 variable genes labelled
+
+```{r, fig.width=8}
+plot1 <- VariableFeaturePlot(seurat_merged,
+                             selection.method = "sct")
+top10 <- VariableFeatures(seurat_merged)[1:10]
+
+#alternatively get these from the object
+top10_v2 <- seurat_merged@assays$SCT@var.features[1:10]
+
+#are they the same?
+top10 == top10_v2 #yes!
+
+#create plot with labels added
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+```
+
+Run PCA and visualize 
+
+
+```{r}
+seurat_merged <- RunPCA(seurat_merged)
+```
+
+Look at which genes are driving your PCs.
+
+```{r, fig.width=8}
+VizDimLoadings(seurat_merged,
+               dims = 1:2)
+```
+
+
+```{r}
+DimPlot(seurat_merged)
+
+```
+We see a clear batch effect between cells from v2 and v3 on PC1. 
+
+
+Choose optimal  number of PCs for UMAP
+```{r}
+ElbowPlot(seurat_merged, ndims = 50)
+#20 seems good
+```
+
+>Run the seurat UMAP function and visualize
+
+Is there a batch effect? 
+
+
+```{r}
+seurat_merged <- RunUMAP(seurat_merged,
+                         dims = 1:20)
+DimPlot(seurat_merged,
+        group.by = "orig.ident")
+```
+
+Do cells cluster by celltypes?
+For some clusters they do, but there is one cluster unique to v2 and one unique to v3. 
+We also see the batch effect. 
+
+
+plot some pbmc celltype markers to see how they look on the UMAP
+
+```{r}
+FeaturePlot(seurat_merged, 
+            features = c("CD3E", "CD4", "CD8A", "MS4A1", "CD14", "FCGR3A","LYZ","GNLY"))
+```
+CD14 and LYZ mark the two clusters that are batch affected. 
+
+
+# Multiple dataset Integration with SCTransform
+
+Check out the Vignette: https://satijalab.org/seurat/articles/integration_introduction.html#performing-integration-on-datasets-normalized-with-sctransform-1 
+
+we will read in the objects again to start the integration workflow from scratch
+
+```{r}
+pbmcv2 <- readRDS("/t1-data/project/obds/shared/resources/4_r_single_cell/integration/pbmcv2_filtered.rds")
+pbmcv3 <- readRDS("/t1-data/project/obds/shared/resources/4_r_single_cell/integration/pbmcv3_filtered.rds")
+```
+
+> generate a named list of the two objects to run workflow
+
+```{r}
+pbmc.list <- list("v2" = pbmcv2, "v3" = pbmcv3)
+pbmc.list
+```
+
+Apply SCTransform across the list
+```{r}
+
+#this applies the function to each object in the list independently. 
+#this is different to above where we ran the SCTransform on the merged data, so it was performed on all the data at once.
+pbmc.list <- lapply(pbmc.list, SCTransform, vars.to.regress = "percent.mt") 
+```
+
+check dims for both objects in list after SCTransform
+```{r}
+dim(pbmc.list[[1]]) 
+dim(pbmc.list[[2]])
+
+#cells are the same as before but the genes have decreased
+```
+
+make sure Default assay in both objects is SCT
+```{r}
+DefaultAssay(pbmc.list[[1]])
+DefaultAssay(pbmc.list[[2]])
+
+lapply(pbmc.list, DefaultAssay)
+```
+
+Choose the features to use when integrating multiple datasets. 
+
+This function ranks features by the number of datasets they are deemed variable in, breaking ties by the median variable feature rank across datasets. It returns the top scoring features by this ranking.
+```{r}
+
+#find the most common variable features
+features <- SelectIntegrationFeatures(pbmc.list,
+                                      nfeatures = 3000) 
+#if we hadn't already run find variable features, then we would also need to include fvf.nfeatures = 3000
+
+#how similar are these features to the variable features that we found for the pbmcv2 and v3 individually?
+
+#extract variable features for each dataset individually
+v2_features <- VariableFeatures(pbmc.list[[1]])
+v3_features <- VariableFeatures(pbmc.list[[2]])
+
+#compare these with "features" which is the variable features most common for both datasets
+
+intersect(features, v2_features) %>% length() #2386 variable features in common
+intersect(features, v3_features) %>% length() #2023 variable features in common
+
+
+
+```
+
+
+Prepare an object list normalized with sctransform for integration.
+Run `PrepSCTIntegration()` 
+Subsets scale.data slot to only contain residuals for anchor.features for efficiency in downstream processing
+
+> you do not run this command in the RNA normalisation  workflow, it makes sure you have the sctranform residuals for the remaining genes
+
+```{r}
+pbmc.list <- PrepSCTIntegration(pbmc.list,
+                                anchor.features = features) #use the list of common variable features we made in previous chunk
+
+```
+
+> After this step, the features present in the scale.data slots of the two objects are the same
+> anchor.features are used in the anchor finding process
+
+
+Find a set of anchors between a list of Seurat objects. These anchors can later be used to integrate the objects.
+
+```{r}
+pbmc.anchors <- FindIntegrationAnchors(pbmc.list,
+                                       anchor.features = features,
+                                       normalization.method = "SCT",
+                                       scale = FALSE,
+                                       reduction = "cca",
+                                       dims = 1:20) #same as merge so we can compare
+
+#use scale = FALSE if you are working on objects that have already been regressed for percent.mt
+#otherwise it will regress the objects again
+#reduction cca is the default and is a stringent batch correction, but very memory intensive so might crash with >80000 cells
+#so alternatively use rpca which is still effective but a bit less stringent
+#k.anchor, filter and score can be changed to try and look for rare cell types
+
+
+```
+
+Integrate the two pbmc objects
+
+```{r}
+pbmc.combined.sct <- IntegrateData(pbmc.anchors,
+                                   dims = 1:20,
+                                   normalization.method = "SCT")
+
+#if you want to integrate more than two then you specify features to integrate which will return all those features
+```
+
+> If normalization.method = "SCT", the integrated data is returned to the scale.data slot and can be treated as centered, corrected Pearson residuals. so we dont scale again after integrating the two datasets
+
+
+
+what is the Default assay now?
+Check to see if the seurat object has changed in the Assay slot at all
+
+```{r}
+pbmc.combined.sct
+#active assay is now Integrated
+#it has 3000 features
+```
+
+WE don't have to do a scaling step because that is included in the integration step.
+
+Run  PCA on Integrated data
+
+```{r}
+pbmc.combined.sct <- RunPCA(pbmc.combined.sct)
+```
+
+```{r}
+ElbowPlot(pbmc.combined.sct)
+```
+WE can use 15 PCs going forward.
+
+Visualise PCA
+
+```{r}
+DimPlot(pbmc.combined.sct)
+```
+We can see that the integration looks much better than the merge.
+
+
+
+
+Run UMAP 
+```{r}
+
+pbmc.combined.sct <- RunUMAP(pbmc.combined.sct,
+                             dims = 1:15)
+```
+
+
+```{r}
+DefaultAssay(pbmc.combined.sct)
+```
+
+Find neighbors and clusters for the integrated data
+
+run `FindNeighbors()` and `FindClusters()` 
+try using multiple resolutions at the same time for the clustering
+
+```{r}
+pbmc.combined.sct <- FindNeighbors(pbmc.combined.sct,
+                                   dims = 1:15,
+                                   )
+
+pbmc.combined.sct <- FindClusters(pbmc.combined.sct,
+                                  resolution = c(0.5, 0.8)
+                                  )
+
+#various algorithms are available, louvain is the default but you can try the others to get a more fine-scale clustering e.g. leiden
+```
+How many clusters?
+```{r}
+#look at the metadata
+pbmc.combined.sct[[]]
+
+Graphs(pbmc.combined.sct)
+
+```
+
+
+Visualse UMAP plot for batch effect and clusters
+
+check the Default Assay to be sure
+
+```{r}
+
+DefaultAssay(pbmc.combined.sct)
+
+
+
+DimPlot(pbmc.combined.sct, reduction = "umap",
+        group.by = c("orig.ident", "integrated_snn_res.0.5") )
+```
+It looks like our integration has worked well.
+
+
+Plot some canonical PBMC cluster markers
+
+Which assay should we plot them on?
+try both Integrated and SCT
+is there a difference?
+
+
+```{r, fig.width=8}
+DefaultAssay(pbmc.combined.sct) #using "integrated"
+FeaturePlot(object = pbmc.combined.sct, 
+            features = c("S100A9", "S100A8", "LYZ", "IGKC","GNLY","IGHM", "NKG7", "IGLC2"))
+```
+Set default assay to "SCT" then do the same plot
+```{r}
+DefaultAssay(pbmc.combined.sct) <- "SCT" #set to SCT assay
+FeaturePlot(object = pbmc.combined.sct, 
+            features = c("S100A9", "S100A8", "LYZ", "IGKC","GNLY","IGHM", "NKG7", "IGLC2"))
+```
+We can see that when the integrated data is plotted there is a higher background than when we plot the SCT. 
+SO better to visualise on the SCT plots. 
+This is because of the background smoothing that has been done to batch correct.
+
+#Differential expression
+For a single assay we ran the DE on the RNA assay.
+See this vignette for how it is different here
+https://satijalab.org/seurat/articles/sctransform_v2_vignette.html
+
+We first need to run PrepSCTFindMarkers
+https://satijalab.org/seurat/reference/prepsctfindmarkers
+This will allow us to do the DE.
+
+It is not in the solution!
+This is going to correct the counts according to both the models, so that we can run the DE on the SCT model.
+We can't run it on the integrated model because the genes are no longer independent of each other. 
+It does not meet the assumptions that are required for DE. 
+
+
+```{r}
+DefaultAssay(pbmc.combined.sct) <- "SCT"
+
+pbmc.combined.sct <- PrepSCTFindMarkers(pbmc.combined.sct,
+                                        assay = "SCT")
+
+```
+
+Differential expression for cluster markers
+look up `FindMarkers` and `FindAllMarkers`
+
+Why are we changing the DefaultAssay?
+Do we need to renormalise RNA Assay?
+- see notes above and below!
+
+We are looking for markers that differentiate the clusters.
+
+```{r}
+
+#check the active ident
+identities <- Idents (pbmc.combined.sct) %>% head #they are the clustering levels
+identities
+#we could change it like we do with DefaultAssay
+
+pbmc.combined.sct[[]]
+
+Idents(pbmc.combined.sct) <- "integrated_snn_res.0.5"
+
+DefaultAssay(pbmc.combined.sct)
+#Watch out do not reassign this to the same object!!
+pbmc.combined.sct.markers <- FindAllMarkers(pbmc.combined.sct,
+                                            assay = "SCT",
+                                            min.pct = 0.25)
+
+#latent.vars is things you want to regress out when it does the DE for each gene
+#it cannot be set for Wilcoxon which is the default test
+#this is what Devika has done in the solution where she runs the FindAllMarkers on the RNA assay not the integrated assay.
+
+#So FindAllMarkers is looking for the best genes that distinguish each cluster by performing sequential pairwise comparisons between all the clusters
+#Whereas FindMarkers is used to compare once cluster to all the others, and you specify which cluster is your baseline cluster
+
+```
+
+Filter the top 5 markers for each cluster
+use `dply::group_by` and `slice_max()`
+```{r}
+pbmc.combined.sct.markers
+#we have generated a df where each row is a gene and it says which cluster that gene is assigned to
+
+top5_markers <- pbmc.combined.sct.markers %>%
+  group_by(cluster) %>%
+  slice_max(order_by = avg_log2FC, n = 5)
+
+top5_markers
+
+top10_padj <- pbmc.combined.sct.markers %>%
+  group_by(cluster) %>%
+  slice_min(order_by = p_val_adj, n = 10)
+
+```
+If we were super interested we could also run the DE on the RNA assay and compare the results.
+
+
+plot Heatmap or Dotplot of markers
+
+try functions `Seurat::DoHeatmap` or `Seurat::Dotplot`
+
+```{r}
+DoHeatmap(pbmc.combined.sct,
+          features = top10_padj$gene)
+
+
+```
+Dotplot
+
+```{r}
+DotPlot(pbmc.combined.sct,
+        features = unique(top10_padj$gene))
+#include unique as some of the genes are duplicated
+
+```
+Try the DE again with some different parameters
+
+```{r}
+pbmc.combined.sct.markers_v2 <- FindAllMarkers(pbmc.combined.sct,
+                                            assay = "SCT",
+                                            min.pct = 0.25,
+                                            test.use = "MAST",
+                                            latent.vars = "orig.ident")
+#this time we are telling it to normalise for the confounder batch effect
+#We are using MAST to performe the differential expression
+
+```
+
+Find top 10 markers by padj
+
+```{r}
+top10_padj_v2 <- pbmc.combined.sct.markers_v2 %>%
+  group_by(cluster) %>%
+  slice_min(order_by = p_val_adj, n = 10)
+```
+
+
+Make another heat map
+
+```{r}
+DoHeatmap(pbmc.combined.sct,
+          features = top10_padj_v2$gene)
+```
+We can see that clusters 1&2 are quite similar, so are 4, 5, 6 so perhaps we could review the clustering in this case. 
+
+
+#Bonus Exercise: Run Harmony based integration
+
+## Harmony integration 
+
+You can run Harmony within your Seurat workflow. You'll only need to make two changes to your code.
+
+
+> IMPORTANT DIFFERENCE: In the Seurat integration tutorial, you need to define a Seurat object for each dataset. 
+
+> With Harmony integration, create only one Seurat object with all cells.
+
+> Before running Harmony, make a Seurat object and following the standard pipeline through PCA.
+
+After that Run Harmony with the `RunHarmony()` function
+In downstream analyses, use the Harmony embeddings instead of PCA.
+For example, run Harmony and then UMAP in two lines.
+
+Vignette: http://htmlpreview.github.io/?https://github.com/immunogenomics/harmony/blob/master/docs/SeuratV3.html
+
+```{r}
+# create a merged obect of the datasets you want ot integrate
+seurat_merged <- merge()
+
+# Normalise the data NormalizeData(), ScaleData() , FindVariablegenes() or SCTransform()
+
+# Run PCA
+
+# Run Harmony
+seurat_merged <- RunHarmony()
+
+# Run UMAP
+
+# Clustering
+
+# Visulaize umap for dataset and clusters
+
+    
+```
+
+Compute LISI : https://github.com/immunogenomics/LISI 
+
+```{r}
+# Compute integration LISI and cell-type LISI
+# iLISI - effective number of datasets in a neighbourhood - want this to equal number of batches
+# cLISI - want this to equal 1 - number of cell types in neighbourhood i.e. different cell types should form distinct clusters
+meta_data_cells <- data.frame(technology = seurat_merged@meta.data$orig.ident)
+lisi_res <- lisi::compute_lisi(Embeddings(seurat_merged, reduction = "harmony"), 
+                               meta_data_cells, 
+                               "technology")
+
+# Should you use clusters determined from joint embedding for clisi?
+
+cat("LISI values - iLISI mean and range, cLISI mean and range")
+mean(lisi_res$technology)   # 1.70 (2 would be perfect if equal number of cells in two datasets)
+range(lisi_res$technology)
+
+# For cLISI, need to separately annotate cell types in the two individual datasets
+```
+
